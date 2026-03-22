@@ -7,7 +7,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from scipy.interpolate import griddata
 from flask import Flask, render_template, jsonify, send_file, request
-import google.generativeai as genai
+from google import genai
 warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
@@ -18,8 +18,8 @@ MODEL_DIR = os.path.join(BASE_DIR, "models")
 
 # ── AI CONFIG ─────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-genai.configure(api_key=GEMINI_API_KEY)
-AI_MODEL = genai.GenerativeModel("gemini-2.5-flash")
+AI_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+AI_MODEL_NAME = "gemini-2.5-flash"
 
 IMD_SEASONS = {
     'Winter':      [1, 2],
@@ -1321,7 +1321,7 @@ def _strip_fences(raw: str) -> str:
 
 
 def _call_gemini(prompt: str):
-    response = AI_MODEL.generate_content(prompt)
+    response = AI_CLIENT.models.generate_content(model=AI_MODEL_NAME, contents=prompt)
     raw      = _strip_fences(response.text.strip())
     return json.loads(raw), raw
 
