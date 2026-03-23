@@ -1732,27 +1732,48 @@ def geodata(dataset):
         return jsonify({'error': str(e), 'traceback': tb}), 500
 
 
-# ── STARTUP ───────────────────────────────────────────────────────────────────
-print("Loading data...")
-APP_DATA   = load_data()
-print("Loading models...")
-APP_MODELS = load_models()
-print(f"Ready ✓  Models: {list(APP_MODELS.keys())}")
+# ── LAZY STARTUP ─────────────────────────────────────────────────────────────
+# Gunicorn binds immediately; data loads on first HTTP request.
+APP_DATA   = None
+APP_MODELS = None
+APP_ATTR   = None
+_data_lock = threading.Lock()
 
-# Load optional attribution dataset
-_attr_path = os.path.join(DATA_DIR, 'india_ct_co2_with_attribution.csv')
-if os.path.exists(_attr_path):
-    APP_ATTR = pd.read_csv(_attr_path)
-    if 'month' not in APP_ATTR.columns and 'time' in APP_ATTR.columns:
-        APP_ATTR['time']  = pd.to_datetime(APP_ATTR['time'], errors='coerce')
-        APP_ATTR['month'] = APP_ATTR['time'].dt.month
-    APP_ATTR['month'] = pd.to_numeric(APP_ATTR['month'], errors='coerce')
-    if 'season' not in APP_ATTR.columns:
-        APP_ATTR['season'] = APP_ATTR['month'].apply(get_season)
-    print(f"Attribution data ✓  shape: {APP_ATTR.shape}")
-else:
-    APP_ATTR = None
-    print("Attribution CSV not found — copy india_ct_co2_with_attribution.csv to data/ to enable attribution analysis")
+def _ensure_loaded():
+    global APP_DATA, APP_MODELS, APP_ATTR
+    if APP_DATA is not None:
+        return
+    with _data_lock:
+        if APP_DATA is not None:
+            return
+        print("Lazy-loading data...")
+        APP_DATA = load_data()
+        print("Lazy-loading models...")
+        APP_MODELS = load_models()
+        print(f"Models ready: {list(APP_MODELS.keys())}")
+        _attr_path = os.path.join(DATA_DIR, 'india_ct_co2_with_attribution.csv')
+        if os.path.exists(_attr_path):
+            _attr = pd.read_csv(_attr_path)
+            if 'month' not in _attr.columns and 'time' in _attr.columns:
+                _attr['time']  = pd.to_datetime(_attr['time'], errors='coerce')
+                _attr['month'] = _attr['time'].dt.month
+            _attr['month'] = pd.to_numeric(_attr['month'], errors='coerce')
+            if 'season' not in _attr.columns:
+                _attr['season'] = _attr['month'].apply(get_season)
+            APP_ATTR = _attr
+            print(f"Attribution data ready: {APP_ATTR.shape}")
+        else:
+            APP_ATTR = None
+        print("All data loaded ✓")
+
+@app.before_request
+def before_request():
+    if request.path != '/health':
+        _ensure_loaded()
+
+@app.route('/health')
+def health():
+    return 'ok', 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000, use_reloader=False)
